@@ -1048,9 +1048,30 @@ typedef struct
   guint                  n;
 } SegmentPlan;
 
+/* Which of a piece's two edges are the item's own ends rather than cuts the
+ * shaper agreed to. A piece is only ever stored with its inner cuts checked
+ * against HB_GLYPH_FLAG_UNSAFE_TO_CONCAT, but an item's ends are not checked:
+ * "FROM " shaped as an item of its own has an unkerned space, and the same
+ * bytes inside "FROM THE" kern the space against the T. Keying the edges keeps
+ * a piece that ended an item from being served where text follows it, which
+ * nytimes.com did with its spaced capitals and paragraphs, a few hundred
+ * times a page.
+ */
+#define NS_SHAPE_KEY_ITEM_START (1u << 9)
+#define NS_SHAPE_KEY_ITEM_END   (1u << 10)
+
+static guint
+segment_edges (const SegmentPlan *plan,
+               guint              i)
+{
+  return (i == 0 ? NS_SHAPE_KEY_ITEM_START : 0) |
+         (i + 1 == plan->n ? NS_SHAPE_KEY_ITEM_END : 0);
+}
+
 static gboolean
 segment_key (const SegmentPlan *plan,
              guint              i,
+             guint              edges,
              NsPangoShapeKey   *key)
 {
   guint32 start = plan->starts[i];
@@ -1061,7 +1082,7 @@ segment_key (const SegmentPlan *plan,
                                         plan->item_text + start, len,
                                         plan->paragraph_text, plan->paragraph_length,
                                         plan->flags, plan->show_flags,
-                                        NS_PANGO_TEXT_TRANSFORM_NONE,
+                                        NS_PANGO_TEXT_TRANSFORM_NONE | edges,
                                         NS_PANGO_SHAPE_HYPHEN_NONE,
                                         plan->features, plan->num_features);
 }
@@ -1157,7 +1178,7 @@ insert_segments (const SegmentPlan        *plan,
 
       if ((i > 0 && cuts->unsafe[i]) ||
           (i + 1 < n && cuts->unsafe[i + 1]) ||
-          !segment_key (plan, i, &key))
+          !segment_key (plan, i, segment_edges (plan, i), &key))
         {
           refused++;
           continue;
@@ -1184,7 +1205,8 @@ whole_item_key (const SegmentPlan *plan,
                                         plan->item_text, plan->item_length,
                                         plan->paragraph_text, plan->paragraph_length,
                                         plan->flags, plan->show_flags,
-                                        NS_PANGO_TEXT_TRANSFORM_NONE,
+                                        NS_PANGO_TEXT_TRANSFORM_NONE |
+                                        NS_SHAPE_KEY_ITEM_START | NS_SHAPE_KEY_ITEM_END,
                                         NS_PANGO_SHAPE_HYPHEN_NONE,
                                         plan->features, plan->num_features);
 }
@@ -1206,11 +1228,18 @@ serve_from_cache (const SegmentPlan  *plan,
   for (i = 0; i < plan->n; i++)
     {
       guint seg = backwards ? plan->n - 1 - i : i;
+      guint edges = segment_edges (plan, seg);
       int before = at;
 
-      if (!segment_key (plan, seg, &key))
+      /* A piece whose cuts were both checked may stand anywhere, the ends of
+       * an item included; one stored at an item's end only at an end.
+       */
+      if (!segment_key (plan, seg, edges, &key))
         break;
-      if (!ns_pango_shape_cache_lookup_at (&key, glyphs, at, (int) plan->starts[seg]))
+      if (!ns_pango_shape_cache_lookup_at (&key, glyphs, at, (int) plan->starts[seg]) &&
+          (edges == 0 ||
+           !segment_key (plan, seg, 0, &key) ||
+           !ns_pango_shape_cache_lookup_at (&key, glyphs, at, (int) plan->starts[seg])))
         break;
 
       at = glyphs->num_glyphs;
@@ -1387,7 +1416,7 @@ ns_pango_shape_internal (const char          *item_text,
    * brought none gets no capitalisation at all. Those two shape differently
    * under the same transform, so the key has to tell them apart.
    */
-  transform_key = transform;
+  transform_key = transform | NS_SHAPE_KEY_ITEM_START | NS_SHAPE_KEY_ITEM_END;
   if (transform == NS_PANGO_TEXT_TRANSFORM_CAPITALIZE && log_attrs == NULL)
     transform_key |= 1u << 8;
 
