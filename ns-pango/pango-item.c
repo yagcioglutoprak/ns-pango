@@ -74,6 +74,9 @@ ns_pango_item_copy (NsPangoItem *item)
   if (result->analysis.font)
     g_object_ref (result->analysis.font);
 
+  if (((NsPangoAnalysisPrivate *)&result->analysis)->metrics_font)
+    g_object_ref (((NsPangoAnalysisPrivate *)&result->analysis)->metrics_font);
+
   extra_attrs = NULL;
   tmp_list = item->analysis.extra_attrs;
   while (tmp_list)
@@ -110,6 +113,9 @@ ns_pango_item_free (NsPangoItem *item)
 
   if (item->analysis.font)
     g_object_unref (item->analysis.font);
+
+  if (((NsPangoAnalysisPrivate *)&item->analysis)->metrics_font)
+    g_object_unref (((NsPangoAnalysisPrivate *)&item->analysis)->metrics_font);
 
   if (item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_HAS_CHAR_OFFSET)
     g_slice_free (NsPangoItemPrivate, (NsPangoItemPrivate *)item);
@@ -371,6 +377,36 @@ ns_pango_analysis_get_size_font (const NsPangoAnalysis *analysis)
   NsPangoAnalysisPrivate *priv = (NsPangoAnalysisPrivate *)analysis;
 
   return priv->size_font;
+}
+
+/*< private >
+ * ns_pango_analysis_set_metrics_font:
+ * @analysis: a `NsPangoAnalysis`
+ * @font: (nullable): the first available font of the item's description
+ *
+ * Records the font a line box takes its ascent and descent from when the
+ * item's own font is a fallback. CSS sizes an inline box from its first
+ * available font, so a fallback glyph does not make the line taller.
+ */
+void
+ns_pango_analysis_set_metrics_font (NsPangoAnalysis *analysis,
+                                    NsPangoFont     *font)
+{
+  NsPangoAnalysisPrivate *priv = (NsPangoAnalysisPrivate *)analysis;
+
+  if (font)
+    g_object_ref (font);
+  if (priv->metrics_font)
+    g_object_unref (priv->metrics_font);
+  priv->metrics_font = font;
+}
+
+NsPangoFont *
+ns_pango_analysis_get_metrics_font (const NsPangoAnalysis *analysis)
+{
+  const NsPangoAnalysisPrivate *priv = (const NsPangoAnalysisPrivate *)analysis;
+
+  return priv->metrics_font;
 }
 
 /**

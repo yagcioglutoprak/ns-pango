@@ -5791,7 +5791,18 @@ ns_pango_layout_run_get_extents_and_height (NsPangoLayoutRun *run,
 
   if (line_logical)
     {
+      NsPangoFont *metrics_font = ns_pango_analysis_get_metrics_font (&run->item->analysis);
+
       *line_logical = *run_logical;
+
+      if (metrics_font && !properties.shape_set)
+        {
+          NsPangoRectangle base;
+
+          ns_pango_font_get_glyph_extents (metrics_font, NS_PANGO_GLYPH_EMPTY, NULL, &base);
+          line_logical->y = base.y - y_offset;
+          line_logical->height = base.height;
+        }
 
       if (properties.absolute_line_height != 0 || properties.line_height != 0.0)
         {
@@ -6827,7 +6838,7 @@ apply_baseline_shift (NsPangoLayoutLine *line,
           if (item->analysis.flags & NS_PANGO_ANALYSIS_FLAG_CENTERED_BASELINE)
             baseline_tag = HB_OT_LAYOUT_BASELINE_TAG_IDEO_EMBOX_CENTRAL;
           else
-            baseline_tag = hb_ot_layout_get_horizontal_baseline_tag_for_script (script);
+            baseline_tag = HB_OT_LAYOUT_BASELINE_TAG_ROMAN;
           hb_ot_layout_get_baseline_with_fallback (hb_font,
                                                    baseline_tag,
                                                    direction,

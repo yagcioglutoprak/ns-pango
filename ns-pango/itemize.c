@@ -617,6 +617,27 @@ copy_attr_slist (GSList *attr_slist)
   return g_slist_reverse (new_list);
 }
 
+static NsPangoFont *get_base_font (ItemizeState *state);
+
+/* A fallback font's ascent and descent are not the line's: CSS sizes an inline
+ * box from its first available font, and a glyph taken from another font only
+ * draws in it. Chrome lays "Hello 😀" and "中文 Chinese" out at exactly their
+ * line-height; the fallback's own metrics made those lines a pixel taller.
+ */
+static void
+itemize_state_note_fallback (ItemizeState *state,
+                             NsPangoItem  *item)
+{
+  NsPangoFont *base;
+
+  if (!item->analysis.font)
+    return;
+
+  base = get_base_font (state);
+  if (base && base != item->analysis.font)
+    ns_pango_analysis_set_metrics_font (&item->analysis, base);
+}
+
 static void
 itemize_state_fill_font (ItemizeState *state,
                          NsPangoFont    *font)
@@ -629,7 +650,10 @@ itemize_state_fill_font (ItemizeState *state,
       if (item->analysis.font)
         break;
       if (font)
-        item->analysis.font = g_object_ref (font);
+        {
+          item->analysis.font = g_object_ref (font);
+          itemize_state_note_fallback (state, item);
+        }
     }
 }
 
@@ -699,6 +723,7 @@ itemize_state_add_character (ItemizeState *state,
     g_object_ref (font);
   state->item->analysis.font = font;
   state->font_position = font_position;
+  itemize_state_note_fallback (state, state->item);
 
   state->item->analysis.level = state->embedding;
   state->item->analysis.gravity = state->resolved_gravity;
@@ -1218,6 +1243,8 @@ apply_scale_to_item (NsPangoContext *context,
 
   if (is_small_caps)
     ns_pango_analysis_set_size_font (&item->analysis, item->analysis.font);
+
+  ns_pango_analysis_set_metrics_font (&item->analysis, NULL);
 
   desc = ns_pango_font_describe (item->analysis.font);
   size = scale * ns_pango_font_description_get_size (desc);
